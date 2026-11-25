@@ -33,9 +33,9 @@ test('cálculo funciona sem frasco físico e usa última dosagem salva por padr�
 });
 
 test('capa de vídeo procura frame após início antes de gerar JPEG, com alternativa na falha',()=>{
- assert.ok(editor.includes("video.currentTime=at"));
+ assert.ok(editor.includes("video.currentTime=offset"));
  assert.ok(editor.includes("await until('seeked',8000"));
- assert.ok(editor.includes("Math.min(2.5,Math.max(.15,duration*.15),duration-.06)"));
+ assert.ok(editor.includes("[.15,.38,.63].map(fraction"));
  assert.ok(editor.includes("canvas.toDataURL('image/jpeg',.82)"));
  assert.ok(editor.includes("Capa automática indisponível: escolher imagem alternativa"));
 });

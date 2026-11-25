@@ -29,6 +29,7 @@ test('Central oficial preserva propriedade, isolamento, idempotência e cancelam
   await apply('release/pacote-final-20261125/20261125211000_campaign_weekly.sql');
   await apply('release/pacote-final-20261125/20261125222000_campaign_publication_delete.sql');
   await apply('release/pacote-final-20261125/20261125223000_campaign_recurrence_times.sql');
+  await apply('release/pacote-final-20261125/20261125224000_campaign_manual_delete.sql');
   await db.exec('alter table storage.objects add column metadata jsonb');
   await db.exec(cases.replace(" desired text;"," desired text; fixture_series uuid; series_rule jsonb; result jsonb; jpeg_material uuid:=gen_random_uuid(); jpeg_publication uuid:=gen_random_uuid(); cover text;").replace(" perform public.neo_campaign_central_v1('archive',parent);",`
    fixture_series:=gen_random_uuid();
@@ -107,6 +108,7 @@ test('Central oficial preserva propriedade, isolamento, idempotência e cancelam
    assert (select count(*) from neo_private.campaign_wa_rich_messages where state='accepted' and receipt_id='simulated')=1;
    assert (select count(*) from neo_private.campaign_wa_rich_messages where state='waiting')=0;
   `));
+  await apply('tests/campaign-manual-delete.sql');
   await apply('release/campaign-central/postflight.sql');
   await apply('release/campaign-central/rollback.sql');
   const {rows}=await db.query(`select not has_function_privilege('authenticated','public.neo_campaign_central_v1(text,jsonb)','execute') as revoked,
