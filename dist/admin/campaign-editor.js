@@ -349,7 +349,6 @@
    const model=contentPreviews.get(block.ref);
    if(!model)return '';
    return `<section class="structured-reference">
-    ${model.video?`<video muted playsinline preload="metadata" data-video-thumb="${e(model.video)}" aria-label="Prévia do vídeo"></video>`:''}
     ${model.image?`<img src="${e(model.image)}" alt="" referrerpolicy="no-referrer">`:''}
     <p class="sub">${e(model.meta||'')}${model.excerpt?' · '+e(model.excerpt):''}</p>
     ${model.file?`<button type="button" class="text-btn" data-editor="open_reference" data-ref="${e(block.ref)}">Abrir na Biblioteca</button>`:''}
@@ -359,15 +358,19 @@
    </section>`;
   }
   async function videoCover(src){
+   const signal=previewAbort.signal;
    // Evitar a capa preta do quadro inicial: capturar um frame após os primeiros segundos.
    // O material permanece na Biblioteca; só a capa JPEG e o link seguem ao WhatsApp.
    const video=document.createElement('video');
    video.crossOrigin='anonymous';video.muted=true;video.playsInline=true;video.preload='auto';
    const until=(eventName,timeout,action)=>new Promise((resolve,reject)=>{
-    const clean=()=>{clearTimeout(timer);video.removeEventListener(eventName,done);video.removeEventListener('error',failed);};
+    const clean=()=>{clearTimeout(timer);video.removeEventListener(eventName,done);video.removeEventListener('error',failed);signal.removeEventListener('abort',abort);};
     const done=()=>{clean();resolve();};
     const failed=()=>{clean();reject(Error('Vídeo indisponível para gerar a capa.'));};
+    const abort=()=>{clean();reject(signal.reason);};
     const timer=setTimeout(()=>{clean();reject(Error('Não foi possível ler um quadro do vídeo.'));},timeout);
+    if(signal.aborted){abort();return;}
+    signal.addEventListener('abort',abort,{once:true});
     video.addEventListener(eventName,done,{once:true});
     video.addEventListener('error',failed,{once:true});
     try{action?.();}catch(error){clean();reject(error);}
@@ -375,20 +378,29 @@
    try{
     await until('loadedmetadata',12000,()=>{video.src=src;video.load();});
     if(!Number.isFinite(video.videoWidth)||video.videoWidth<1||video.videoHeight<1)throw Error('Vídeo sem dimensões válidas.');
-    const duration=video.duration;
-    const at=Number.isFinite(duration)&&duration>0.35?
-     Math.min(2.5,Math.max(.15,duration*.15),duration-.06):0;
-    if(at>0){
-     try{await until('seeked',8000,()=>{video.currentTime=at;});}
-     catch(error){if(video.readyState<2)throw error;}
-    }
     if(video.readyState<2)await until('loadeddata',8000);
+    const duration=video.duration;
+    const offsets=Number.isFinite(duration)&&duration>.35?[.15,.38,.63].map(fraction=>
+     Math.min(duration-.06,Math.max(.15,duration*fraction))):[0];
     const scale=Math.min(1,720/Math.max(video.videoWidth,video.videoHeight));
-    const canvas=document.createElement('canvas');
+    const canvas=document.createElement('canvas'),sample=document.createElement('canvas');
     canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
     canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
-    canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
-    return canvas.toDataURL('image/jpeg',.82);
+    sample.width=sample.height=16;
+    const context=canvas.getContext('2d'),probe=sample.getContext('2d');
+    for(const offset of offsets){
+     if(Math.abs(video.currentTime-offset)>.01)
+      await until('seeked',8000,()=>{video.currentTime=offset;});
+     if(video.readyState<2)continue;
+     probe.drawImage(video,0,0,16,16);
+     const pixels=probe.getImageData(0,0,16,16).data;
+     let lit=0;
+     for(let i=0;i<pixels.length;i+=4)if(Math.max(pixels[i],pixels[i+1],pixels[i+2])>24)lit++;
+     if(lit<13)continue;
+     context.drawImage(video,0,0,canvas.width,canvas.height);
+     return canvas.toDataURL('image/jpeg',.82);
+    }
+    throw Error('Nenhum quadro visível foi encontrado neste vídeo.');
    }finally{video.pause();video.removeAttribute('src');video.load();}
   }
   function loadReference(block){
@@ -407,11 +419,15 @@
      if(!current()||!row)return;
      const file=row.attachments?.find(item=>item.mime==='application/pdf'||item.mime?.startsWith('video/'))||row.attachments?.[0],mime=file?.mime||'';
      model={meta:mime==='application/pdf'?'PDF':mime==='text/plain'?'Documento':mime.startsWith('image/')?'Imagem':mime.startsWith('video/')?'Vídeo':row.url?'Link':'Material',excerpt:(row.body||row.description||'').slice(0,220)};
+     if(file)model.file={...file};
      if(file&&typeof cloud.libraryMediaURL==='function')try{
       const src=await cloud.libraryMediaURL(file,false);
       model.file={...file,view_url:src};
       if(mime.startsWith('image/'))model.image=src;
-      else if(mime.startsWith('video/'))model.image=await videoCover(src);
+      else if(mime.startsWith('video/')){
+       if(block.media_path&&cloud.campaignImageURL)try{model.image=await cloud.campaignImageURL(block.media_path);}catch{}
+       if(!model.image)model.image=await videoCover(src);
+      }
       else if(mime==='application/pdf'&&window.NeoLibraryFiles?.pdfCover)model.image=await window.NeoLibraryFiles.pdfCover(src,previewAbort.signal);
       else if(mime==='text/plain'&&!model.excerpt&&Number(file.size)>0&&file.size<=262144){
        const response=await fetch(src,{cache:'no-store',signal:previewAbort.signal});

@@ -44,6 +44,7 @@
    return dates;
   }
   let loadEpoch=0;
+  const legacyStates=new Map();
   const legacyKey='neo-campaign-editor:'+account+':whatsapp:new';
   const pointer=()=> 'neo-campaign-central:'+account+':'+current;
   const getLocal=key=>{try{return localStorage.getItem(key);}catch{return null;}};
@@ -62,7 +63,7 @@
   function list(){
    screen='list';current=null;detail=null;
    const seen=new Set(rows.map(row=>row.campaign_id));
-   const feed=[...rows,...legacy().filter(row=>row.whatsapp_enabled&&!seen.has(row.id)).map(row=>({...row,campaign_id:row.id,legacy:true}))];
+   const feed=[...rows,...legacy().filter(row=>row.whatsapp_enabled&&!seen.has(row.id)&&!legacyStates.get(row.id)?.deleted).map(row=>({...row,campaign_id:row.id,legacy:true}))];
    const visible=feed.filter(row=>(!filter||campaignState(row)===filter)&&(row.title||'').toLocaleLowerCase('pt-BR').includes(search));
    redraw(`<div class="between"><h2>Campanhas WhatsApp</h2>${button('new','+ Nova campanha','','primary')}</div>
     <div class="inline-actions"><label>Buscar campanha<input type="search" data-central-search value="${escape(search)}"></label><label>Estado<select data-central-filter>
@@ -70,12 +71,22 @@
     ${getLocal(legacyKey)?button('recover','Continuar rascunho anterior'):''}</div><div data-central-feed>
     ${visible.map(row=>`<article class="monitor-block"><div class="between"><h3>${escape(row.title)}</h3><span class="campaign-state">${labels[campaignState(row)]}</span></div>
     <p class="sub">${row.legacy?'Campanha manual · fluxo legado':`${row.publications} publicação(ões) · ${row.drafts} rascunho(s) · ${row.pending||0} pendente(s) · ${row.problems||0} com problema${row.next_at?' · Próxima: '+date(row.next_at):''}`}</p>
-    ${button(row.legacy?'legacy':'open',row.legacy?'Abrir campanha manual':'Abrir campanha',row.campaign_id)}</article>`).join('')||'<p>Nenhuma campanha com esse filtro.</p>'}
+    ${button(row.legacy?'legacy':'open',row.legacy?'Abrir campanha manual':'Abrir campanha',row.campaign_id)}
+    ${row.legacy&&legacyStates.get(row.id)?.can_delete?button('delete_legacy','Excluir campanha manual',row.id):''}</article>`).join('')||'<p>Nenhuma campanha com esse filtro.</p>'}
     </div>${more?button('more','Carregar mais campanhas'):''}`);
+  }
+  async function refreshLegacy(){
+   const ids=[...new Set(legacy().filter(row=>row.whatsapp_enabled).map(row=>row.id))];
+   for(let i=0;i<ids.length;i+=50){
+    const batch=await rpc('legacy_states',{ids:ids.slice(i,i+50)}).catch(()=>null);
+    if(!active()||!Array.isArray(batch))return;
+    for(const id of ids.slice(i,i+50))legacyStates.delete(id);
+    for(const entry of batch)legacyStates.set(entry.id,entry);
+   }
   }
   async function refresh(append=false){
    const epoch=++loadEpoch;
-   const batch=await rpc('list',{offset:append?page:0});
+   const [batch]=await Promise.all([rpc('list',{offset:append?page:0}),refreshLegacy()]);
    if(!active()||epoch!==loadEpoch)return;
    rows=append?[...rows,...batch]:batch;page=rows.length;more=batch.length===50;
    list();
@@ -243,6 +254,11 @@
     if(action==='more')await refresh(true);
     if(action==='open'){view='agenda';await load(id);}
     if(action==='legacy')openLegacy(id,control);
+    if(action==='delete_legacy'&&legacyStates.get(id)?.can_delete&&confirm('Excluir a campanha manual e cancelar os lembretes pendentes? O histórico será preservado.')){
+     await rpc('delete_legacy',{campaign_id:id,confirmed:true});
+     legacyStates.set(id,{deleted:true});
+     await refresh();
+    }
     if(action==='recover')recoverLegacy(control,async saved=>{
      if(!saved||!active())return;
      try{const adopted=await rpc('adopt',{campaign_id:saved.campaign_id});await load(adopted.campaign_id);}
@@ -299,7 +315,7 @@
    if(event.target.matches('[data-central-search]')){search=event.target.value.trim().toLocaleLowerCase('pt-BR');list();root.querySelector('[data-central-search]').focus();}
    if(event.target.matches('[data-central-date]'))root.querySelectorAll('[data-central-date-list] article').forEach(node=>{node.hidden=Boolean(event.target.value&&node.dataset.day<event.target.value);});
   });
-  return {async load(){if(!screen){screen='loading';redraw('<p>Consultando campanhas…</p>');try{await refresh();}catch{screen='failed';show('Central indisponível. Atualize o painel para tentar novamente.');}}},syncLegacy(){if(screen==='list'&&!busy)list();}};
+  return {async load(){if(!screen){screen='loading';redraw('<p>Consultando campanhas…</p>');try{await refresh();}catch{screen='failed';show('Central indisponível. Atualize o painel para tentar novamente.');}}},syncLegacy(){if(screen==='list'&&!busy){list();void refreshLegacy().then(()=>{if(screen==='list'&&!busy)list();});}}};
  }
  window.NeoCampaignCentral={mount};
 })();

@@ -26,8 +26,10 @@ test('central adota revisões, salva publicações separadas e protege os agenda
   await apply('release/pacote-final-20261125/auditoria-final-preflight.sql');
   await apply('release/pacote-final-20261125/20261125222000_campaign_publication_delete.sql');
   await apply('release/pacote-final-20261125/20261125223000_campaign_recurrence_times.sql');
+  await apply('release/pacote-final-20261125/20261125224000_campaign_manual_delete.sql');
   await apply('release/pacote-final-20261125/auditoria-final-postflight.sql');
   await apply('tests/campaign-central.sql');
+  await apply('tests/campaign-manual-delete.sql');
   await apply('release/campaign-central/postflight.sql');
   await apply('release/campaign-central/rollback.sql');
   const {rows}=await db.query(`select not has_function_privilege('authenticated','public.neo_campaign_central_v1(text,jsonb)','execute') as revoked,

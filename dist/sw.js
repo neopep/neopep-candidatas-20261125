@@ -1,5 +1,5 @@
 /* Cache limité à l'interface statique : aucune API, photo ou session. */
-const CACHE='neopeptideos-shell-20261125-auditoria-final';
+const CACHE='neopeptideos-shell-20261125-capas-campanhas';
 const ASSETS=['./','index.html','style.css','appearance.js','core.js','cloud.js','captcha.js','push.js','community-alerts.js','notification-center.js','shop-core.js','shop-promotions.js','shop.js','support.js','media-links.js','pdf-reader.js','library-video.js','library-files.js','library-shelf.js','vendor/pdfjs/pdf.mjs','vendor/pdfjs/pdf.worker.mjs','community.js','library.js','gestures.js','arrival.js','install.js','app.js','admin/agent.js','admin/campaign-editor.js','admin/campaign-central.js','config.js','manifest.webmanifest','assets/background.svg','assets/background-gold.svg','assets/brands/mercadopago.svg','assets/photo-example-1.png','assets/photo-example-2.png','assets/logo-neopep.png','assets/favicon-32.png','assets/icon-maskable-512.png','assets/icon-192.png','assets/icon-512.png','assets/apple-touch-icon.png'];
 const urls=new Set(ASSETS.map(p=>new URL(p,self.registration.scope).href));
 self.addEventListener('install',e=>e.waitUntil((async()=>{
