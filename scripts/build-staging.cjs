@@ -19,6 +19,7 @@ async function prepare() {
 
   const key = process.env.NEO_STAGING_SUPABASE_PUBLISHABLE_KEY || '';
   const vapid = process.env.NEO_STAGING_VAPID_PUBLIC_KEY || '';
+  const captchaSiteKey = (process.env.NEO_STAGING_CAPTCHA_SITE_KEY || '').trim();
   await verifyStagingKey(key);
   if (vapid && !/^[A-Za-z0-9_-]{87}$/.test(vapid)) throw new Error('Chave VAPID pública inválida.');
 
@@ -31,7 +32,9 @@ async function prepare() {
     // O cadastro por e-mail é permitido somente na homologação.
     // A configuração de Produção continua com publicRegistration=false.
     publicRegistration: false,
-    previewRegistration: true,
+    captchaSiteKey,
+    captchaRequired: Boolean(captchaSiteKey),
+    previewRegistration: Boolean(captchaSiteKey),
     appDisplayName: 'NeoPep Teste',
     legacyPushScope: '/neo/',
     stagingGeoEnabled: process.env.NEO_STAGING_GEO_ENABLED === '1' && !!process.env.NEO_STAGING_SERVER_SUPABASE_KEY,
