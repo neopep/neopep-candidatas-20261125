@@ -358,28 +358,42 @@
     <p class="sub">${e(model.meta||'')}${model.excerpt?' · '+e(model.excerpt):''}</p>
     ${model.file?`<button type="button" class="text-btn" data-editor="open_reference" data-ref="${e(block.ref)}">Abrir na Biblioteca</button>`:''}
     ${!readOnly&&['PDF','Vídeo'].includes(model.meta)&&!model.image?
-      `<label class="sub">Selecionar capa deste material<input type="file" name="reference_cover" data-ref="${e(block.ref)}" accept="image/jpeg,image/png,image/webp"></label>`:''}
+      `<label class="sub">Capa automática indisponível: escolher imagem alternativa<input type="file" name="reference_cover" data-ref="${e(block.ref)}" accept="image/jpeg,image/png,image/webp"></label>`:''}
     ${block.type==='community'?'<a href="/#comunidade" target="_blank" rel="noopener noreferrer">Abrir Comunidade</a>':''}
    </section>`;
   }
   async function videoCover(src){
+   // Evitar a capa preta do quadro inicial: capturar um frame após os primeiros segundos.
+   // O material permanece na Biblioteca; só a capa JPEG e o link seguem ao WhatsApp.
    const video=document.createElement('video');
    video.crossOrigin='anonymous';video.muted=true;video.playsInline=true;video.preload='auto';
+   const until=(eventName,timeout,action)=>new Promise((resolve,reject)=>{
+    const clean=()=>{clearTimeout(timer);video.removeEventListener(eventName,done);video.removeEventListener('error',failed);};
+    const done=()=>{clean();resolve();};
+    const failed=()=>{clean();reject(Error('Vídeo indisponível para gerar a capa.'));};
+    const timer=setTimeout(()=>{clean();reject(Error('Não foi possível ler um quadro do vídeo.'));},timeout);
+    video.addEventListener(eventName,done,{once:true});
+    video.addEventListener('error',failed,{once:true});
+    try{action?.();}catch(error){clean();reject(error);}
+   });
    try{
-    await new Promise((resolve,reject)=>{
-     const timer=setTimeout(()=>reject(Error('A miniatura do vídeo não ficou pronta.')),8000);
-     video.onloadeddata=()=>{clearTimeout(timer);resolve();};
-     video.onerror=()=>{clearTimeout(timer);reject(Error('Vídeo indisponível para gerar a miniatura.'));};
-     video.src=src;
-    });
+    await until('loadedmetadata',12000,()=>{video.src=src;video.load();});
+    if(!Number.isFinite(video.videoWidth)||video.videoWidth<1||video.videoHeight<1)throw Error('Vídeo sem dimensões válidas.');
+    const duration=video.duration;
+    const at=Number.isFinite(duration)&&duration>0.35?
+     Math.min(2.5,Math.max(.15,duration*.15),duration-.06):0;
+    if(at>0){
+     try{await until('seeked',8000,()=>{video.currentTime=at;});}
+     catch(error){if(video.readyState<2)throw error;}
+    }
+    if(video.readyState<2)await until('loadeddata',8000);
     const scale=Math.min(1,720/Math.max(video.videoWidth,video.videoHeight));
-    if(!Number.isFinite(scale)||video.videoWidth<1)throw Error('Quadro do vídeo indisponível.');
     const canvas=document.createElement('canvas');
     canvas.width=Math.max(1,Math.round(video.videoWidth*scale));
     canvas.height=Math.max(1,Math.round(video.videoHeight*scale));
     canvas.getContext('2d').drawImage(video,0,0,canvas.width,canvas.height);
     return canvas.toDataURL('image/jpeg',.82);
-   }finally{video.removeAttribute('src');video.load();}
+   }finally{video.pause();video.removeAttribute('src');video.load();}
   }
   function loadReference(block){
    if(contentPreviews.has(block.ref))return;

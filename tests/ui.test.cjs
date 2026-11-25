@@ -1,5 +1,10 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),{parseHTML}=require('linkedom'),fs=require('fs'),vm=require('vm'),C=require('../dist/core.js');
-function setup(seed={},options={}){const {document,Event}=parseHTML(fs.readFileSync('dist/index.html','utf8'));const data=new Map(Object.entries(seed)),writes=[];let counter=0;let darkSystem=options.darkSystem??false;const systemEvents=[];const ctx={document,console,Event,localStorage:{getItem:k=>data.get(k)??null,setItem:(k,v)=>{if(options.quota)throw Error('quota');data.set(k,v);writes.push(k)},removeItem:k=>data.delete(k)},location:{hash:'',href:options.url||'https://example.test/',protocol:'https:'},history:{replaceState(a,b,hash){ctx.location.hash=hash}},navigator:{onLine:true},matchMedia:query=>({get matches(){return query.includes('color-scheme')&&darkSystem},addEventListener(type,fn){if(query.includes('color-scheme')&&type==='change')systemEvents.push(fn)}}),setInterval(){},setTimeout(){},clearTimeout(){},addEventListener(){},scrollTo(){},confirm:()=>true,prompt:()=>null,URL,Blob,Date:options.date||Date,Number,String,JSON,FormData:class{},crypto:{randomUUID:()=>String(++counter)},NeoCore:C,NeoCloud:{configured:false,init:async()=>null,...options.cloud},NEO_CONFIG:{providers:{google:false,apple:false,email:false}},indexedDB:null};ctx.window=ctx;document.querySelector('#dialog').showModal=function(){this.setAttribute('open','')};document.querySelector('#dialog').close=function(){this.removeAttribute('open');this.dispatchEvent(new Event('close'))};vm.createContext(ctx);vm.runInContext(fs.readFileSync('dist/appearance.js','utf8'),ctx);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),ctx);return {ctx,document,data,writes,setSystem(dark){darkSystem=dark;for(const fn of systemEvents)fn({matches:dark});},run:code=>vm.runInContext(code,ctx)}}
+function setup(seed={},options={}){const {document,Event}=parseHTML(fs.readFileSync('dist/index.html','utf8'));const selectPrototype=Object.getPrototypeOf(document.createElement('select'));
+ const selectValue=Object.getOwnPropertyDescriptor(selectPrototype,'value');
+ if(selectValue?.get&&!selectValue.set)Object.defineProperty(selectPrototype,'value',{
+  ...selectValue,set(value){for(const option of this.options)option.toggleAttribute('selected',option.value===String(value));}
+ });
+ const data=new Map(Object.entries(seed)),writes=[];let counter=0;let darkSystem=options.darkSystem??false;const systemEvents=[];const ctx={document,console,Event,localStorage:{getItem:k=>data.get(k)??null,setItem:(k,v)=>{if(options.quota)throw Error('quota');data.set(k,v);writes.push(k)},removeItem:k=>data.delete(k)},location:{hash:'',href:options.url||'https://example.test/',protocol:'https:'},history:{replaceState(a,b,hash){ctx.location.hash=hash}},navigator:{onLine:true},matchMedia:query=>({get matches(){return query.includes('color-scheme')&&darkSystem},addEventListener(type,fn){if(query.includes('color-scheme')&&type==='change')systemEvents.push(fn)}}),setInterval(){},setTimeout(){},clearTimeout(){},addEventListener(){},scrollTo(){},confirm:()=>true,prompt:()=>null,URL,Blob,Date:options.date||Date,Number,String,JSON,FormData:class{},crypto:{randomUUID:()=>String(++counter)},NeoCore:C,NeoCloud:{configured:false,init:async()=>null,...options.cloud},NEO_CONFIG:{providers:{google:false,apple:false,email:false}},indexedDB:null};ctx.window=ctx;document.querySelector('#dialog').showModal=function(){this.setAttribute('open','')};document.querySelector('#dialog').close=function(){this.removeAttribute('open');this.dispatchEvent(new Event('close'))};vm.createContext(ctx);vm.runInContext(fs.readFileSync('dist/appearance.js','utf8'),ctx);vm.runInContext(fs.readFileSync('dist/app.js','utf8'),ctx);return {ctx,document,data,writes,setSystem(dark){darkSystem=dark;for(const fn of systemEvents)fn({matches:dark});},run:code=>vm.runInContext(code,ctx)}}
 test('todos os módulos renderizam em DOM e branding não contém Elo fora da migração',async()=>{const a=setup();for(const route of ['inicio','evolucao','registros','diario','aplicacoes','protocolos','calculadora','relatorios','calendario','lembretes','perfil','bemvindo','privacidade','fotos','onboarding','termos']){await a.run(`go('${route}',false)`);assert.ok(a.document.querySelector('#content').textContent.length>50,route)}assert.match(a.document.title,/NeoPep/);assert.equal(a.document.querySelectorAll('#nav button').length,5);assert.equal(a.writes.length,0)});
 test('prévia não migra nem grava elo-v1 automaticamente',()=>{const original=JSON.stringify({weights:[{id:1,date:C.today(),value:81}],measures:[],doses:[],settings:{}});const a=setup({'elo-v1':original});assert.equal(a.data.get('elo-v1'),original);assert.equal(a.writes.length,0);assert.equal(a.run('state.weights.length'),0)});
 test('CRUD local persiste e volta após nova abertura sem sobrescrever Elo',async()=>{const original='original',a=setup({'elo-v1':original});await a.run(`putRecord('weights',{id:'x',date:C.today(),value:80,note:''})`);assert.equal(a.writes.at(-1),'neo-v2');assert.equal(a.data.get('elo-v1'),original);assert.equal(a.run('state.weights.length'),1);const b=setup(Object.fromEntries(a.data));assert.equal(b.run('state.weights[0].value'),80);await a.run(`putRecord('weights',{id:'y',date:C.today(),value:79,note:''})`);assert.equal(a.run('state.weights.length'),1);assert.equal(a.run('state.weights[0].id'),'x');assert.equal(a.run('state.weights[0].value'),79)});
@@ -463,7 +468,7 @@ test('dosagens preservam precisão, múltiplos itens, seleção, renomeação e 
  put('10','1','2','Outro');assert.equal(q('#calc-saved-list').children.length,1);
  const reopened=setup(Object.fromEntries(a.data));reopened.ctx.NeoCloud.user={id:owner};
  reopened.run("mode='cloud';page='calculadora';render()");
- assert.equal(reopened.document.querySelector('#dose').value,'4.275');
+ assert.equal(reopened.document.querySelector('#dose').value,'2.5');
  reopened.document.querySelector('[data-saved-id="'+first.id+'"] [data-calc-saved-action=remove]').click();
  assert.equal(reopened.document.querySelectorAll('.calc-saved-row').length,1);
 });
@@ -550,7 +555,7 @@ test('card da Home mostra somente o último cálculo salvo da conta e abre a cal
  home();
  assert.match(card().textContent,/Seringa de 1 mL/);
  await open();
- assert.equal(a.run('calcCapacityValue'),.3,'restauração continua respeitando a seleção existente');
+ assert.equal(a.run('calcCapacityValue'),1,'a abertura restaura a última dosagem salva');
  q('#calc-saved-list article:first-child [data-calc-saved-action=remove]').click();
  home();assert.match(card().textContent,/Seringa de 0,5 mL/);
  a.ctx.NeoCloud.user={id:other};home();
@@ -677,4 +682,24 @@ test('personalização é independente, opcional e revisável por conta',async()
  assert.equal(decisions.has('c'),false);
  assert.equal(q('#privacyPreferences').hidden,false);
  assert.match(q('[data-privacy-notice]').textContent,/Não foi possível confirmar/);
+});
+
+test('exportação de comparação aplica a paleta efetiva à curva e à escala',()=>{
+ const a=setup();
+ const commands=[];
+ a.ctx.graph={set strokeStyle(value){commands.push(value)},set fillStyle(value){commands.push(value)},
+  createLinearGradient(){return {addColorStop(index,value){commands.push(value)}}},
+  beginPath(){},moveTo(){},lineTo(){},closePath(){},stroke(){},fill(){},fillText(){},save(){},restore(){},setLineDash(){},arc(){}};
+ for(const [theme,background,title,accent,grid] of [
+  ['light','#F4F5F6','#142743','#223F63','#A8B4CC'],
+  ['dark','#12100e','#dfbd78','#dfbd78','#524233']
+ ]){
+  commands.length=0;
+  const palette=a.run(`comparisonExportPalette('${theme}')`);
+  assert.equal(palette.background,background);
+  assert.equal(palette.title,title);
+  a.run(`drawComparisonWeight(graph,{rows:[{date:'2026-01-01',value:80},{date:'2026-01-10',value:78}],reference:77,units:'kg'},'sans-serif',1300,comparisonExportPalette('${theme}'))`);
+  assert.ok(commands.includes(accent));
+  assert.ok(commands.includes(grid));
+ }
 });

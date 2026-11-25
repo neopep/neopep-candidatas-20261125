@@ -27,6 +27,8 @@ test('Central oficial preserva propriedade, isolamento, idempotência e cancelam
   await apply('release/pacote-final-20261125/20261125210000_campaign_delete.sql');
   await apply('release/pacote-final-20261125/20261125210500_campaign_reference_jpeg.sql');
   await apply('release/pacote-final-20261125/20261125211000_campaign_weekly.sql');
+  await apply('release/pacote-final-20261125/20261125222000_campaign_publication_delete.sql');
+  await apply('release/pacote-final-20261125/20261125223000_campaign_recurrence_times.sql');
   await db.exec('alter table storage.objects add column metadata jsonb');
   await db.exec(cases.replace(" desired text;"," desired text; fixture_series uuid; series_rule jsonb; result jsonb; jpeg_material uuid:=gen_random_uuid(); jpeg_publication uuid:=gen_random_uuid(); cover text;").replace(" perform public.neo_campaign_central_v1('archive',parent);",`
    fixture_series:=gen_random_uuid();
@@ -56,6 +58,44 @@ test('Central oficial preserva propriedade, isolamento, idempotência e cancelam
    assert exists(select 1 from neo_private.campaign_wa_rich_messages m where m.batch_id=(result->>'batch_id')::uuid
     and m.kind='image' and m.media_bucket='neo-campaign-images' and m.media_path=cover
     and m.body like '%Legenda da capa%' and m.body like '%https://app.neopep.com.br/?material='||jpeg_material||'#comunidade');
+   fixture_series:=gen_random_uuid();
+   series_rule:=(series_rule-'days'-'time')||jsonb_build_object('request_id',fixture_series,'frequency','daily',
+    'times',jsonb_build_array('18:30','09:00'),
+    'dates',jsonb_build_array(to_char((now() at time zone 'America/Sao_Paulo')::date+7,'YYYY-MM-DD')||'T09:00',
+                             to_char((now() at time zone 'America/Sao_Paulo')::date+7,'YYYY-MM-DD')||'T18:30'));
+   begin
+    perform public.neo_campaign_weekly_v1('schedule',series_rule||'{"times":["09:00","09:00"]}'::jsonb);
+    raise exception 'duplicate times were accepted';
+   exception when invalid_parameter_value then null;end;
+   assert public.neo_campaign_weekly_v1('schedule',series_rule)->'dates'=series_rule->'dates';
+   assert public.neo_campaign_weekly_v1('schedule',series_rule)->'reused'='true'::jsonb;
+   begin
+    perform public.neo_campaign_weekly_v1('schedule',series_rule||jsonb_build_object('request_id',gen_random_uuid()));
+    raise exception 'same source and time scheduled twice';
+   exception when object_not_in_prerequisite_state then null;end;
+   perform public.neo_campaign_weekly_v1('cancel',parent||jsonb_build_object('request_id',fixture_series,'confirmed',true));
+   begin
+    perform public.neo_campaign_central_v1('delete_publication',parent||jsonb_build_object('publication_id',jpeg_publication));
+    raise exception 'delete without confirmation was accepted';
+   exception when invalid_parameter_value then null;end;
+   perform set_config('request.jwt.claim.sub','00000000-0000-0000-0000-000000000002',true);
+   begin
+    perform public.neo_campaign_central_v1('delete_publication',parent||jsonb_build_object('publication_id',jpeg_publication,'confirmed',true));
+    raise exception 'another account deleted a publication';
+   exception when insufficient_privilege then null;end;
+   perform set_config('request.jwt.claim.sub',actor,true);
+   update neo_private.campaign_wa_rich_messages set state='started' where batch_id=(result->>'batch_id')::uuid;
+   begin
+    perform public.neo_campaign_central_v1('delete_publication',parent||jsonb_build_object('publication_id',jpeg_publication,'confirmed',true));
+    raise exception 'started dispatch cancelled';
+   exception when object_not_in_prerequisite_state then null;end;
+   update neo_private.campaign_wa_rich_messages set state='leased' where batch_id=(result->>'batch_id')::uuid;
+   perform public.neo_campaign_central_v1('delete_publication',parent||jsonb_build_object('publication_id',jpeg_publication,'confirmed',true));
+   perform public.neo_campaign_central_v1('delete_publication',parent||jsonb_build_object('publication_id',jpeg_publication,'confirmed',true));
+   assert (select count(*) from neo_private.campaign_central_events where publication_id=jpeg_publication and event='publication_deleted')=1;
+   assert public.neo_campaign_central_v1('get',parent)->'publications' @> jsonb_build_array(jsonb_build_object('id',jpeg_publication));
+   assert (select deleted_at from neo_private.campaign_central_publications where id=jpeg_publication) is not null;
+   assert (select state from neo_private.campaign_wa_rich_messages where batch_id=(result->>'batch_id')::uuid)='cancelled';
    update neo_private.campaign_wa_rich_messages set state='waiting' where batch_id=scheduled_ids[1];
    begin
     perform public.neo_campaign_central_v1('delete',parent);
@@ -70,7 +110,7 @@ test('Central oficial preserva propriedade, isolamento, idempotência e cancelam
   await apply('release/campaign-central/postflight.sql');
   await apply('release/campaign-central/rollback.sql');
   const {rows}=await db.query(`select not has_function_privilege('authenticated','public.neo_campaign_central_v1(text,jsonb)','execute') as revoked,
-   (select count(*)::int from neo_private.campaign_wa_rich_batches)=6 as preserved`);
+   (select count(*)::int from neo_private.campaign_wa_rich_batches)=8 as preserved`);
   assert.deepEqual(rows,[{revoked:true,preserved:true}]);
  }catch(error){delete error.query;throw error;}
  finally{await db.close();}

@@ -304,9 +304,15 @@ function calculator(){
  `<div class="calc-layout"><form id="calcForm" class="calc-inputs" data-calc-owner="${esc(calcStorageKey()||'')}" novalidate>
  ${calcField('mass')}${calcField('volume')}${calcCapacity()}${calcField('dose')}
  </form>
- <section class="card calc-vial-overview"><h2>Saldo e duração do frasco</h2><label>Aplicações por semana (conforme seu planejamento)<select id="calc-vial-weekly">${[1,2,3,4,5,6,7].map(n=>`<option value="${n}" ${n===calcVialWeekly?'selected':''}>${n}</option>`).join('')}</select></label><label>Frasco acompanhado neste dispositivo<select id="calc-vial-select"><option value="">Sem frasco selecionado</option></select></label><div id="calc-vial-summary" aria-live="polite"></div><div class="calc-vial-actions"><button type="button" class="secondary" data-calc-vial-action="new">Acompanhar este frasco</button><button type="button" class="text-btn" data-calc-vial-action="remove">Excluir acompanhamento</button></div><p class="sub" role="status" id="calc-vial-status"></p></section>
  <section class="card calc-result"><h2>Resultado</h2><div id="result" role="status" aria-live="polite">${calcEmpty()}</div>
  <p class="sub calc-context">Na escala U-100, 100 unidades correspondem a 1 mL. Essa graduação mede volume e é distinta das unidades de atividade de outras substâncias. Um valor caber na escala não indica que seja prescrito ou seguro.</p></section>
+ <section class="card calc-vial-overview"><h2>Saldo e duração do frasco</h2>
+ <label>Dosagem acompanhada<select id="calc-vial-select"><option value="">Cálculo atual (automático)</option></select></label>
+ <p class="sub">Usa a dosagem salva mais recente como padrão. Alterações nos campos da calculadora atualizam a estimativa imediatamente, sem sobrescrever a dosagem salva.</p>
+ <label>Aplicações por semana (frequência informada)<select id="calc-vial-weekly">${[1,2,3,4,5,6,7].map(n=>`<option value="${n}" ${n===calcVialWeekly?'selected':''}>${n}</option>`).join('')}</select></label>
+ <div id="calc-vial-summary" aria-live="polite"></div>
+ <label>Frasco físico vinculado a aplicações (opcional)<select id="calc-vial-tracked-select"><option value="">Nenhum frasco físico vinculado</option></select></label>
+ <div class="calc-vial-actions"><button type="button" class="secondary" data-calc-vial-action="new">Registrar frasco físico</button><button type="button" class="text-btn" data-calc-vial-action="remove">Excluir vínculo do frasco</button></div><p class="sub" role="status" id="calc-vial-status"></p></section>
  <section class="card calc-formula"><h2>Como o cálculo funciona</h2><ol>
  <li><strong>Concentração</strong><span>Massa total ÷ volume final</span></li>
  <li><strong>Volume</strong><span>Dose informada em mg ÷ concentração</span></li>
@@ -428,7 +434,7 @@ function calcSnapshot(input){
  }catch{return null;}
 }
 
-let calcVialWeekly=1;
+let calcVialWeekly=1,calcVialFormulaSelection='';
 function calcVialStoreKey(){
  const key=calcStorageKey();
  return key?'neo-calc-vials-v1:'+key:null;
@@ -486,32 +492,47 @@ function updateCalcVial(){
  if(!root)return;
  let stored;
  try{stored=readCalcVials()}catch(error){root.textContent=error.message;return}
- const options=$('#calc-vial-select');
- if(options){
-  options.innerHTML='<option value="">Sem frasco selecionado</option>'+
+ let saved={items:[]};
+ try{saved=readCalcSaved(calcStorageKey())}catch{/* Sem dosagens salvas. O cálculo atual permanece disponível. */}
+ const formula=$('#calc-vial-select');
+ if(formula){
+  if(calcVialFormulaSelection&&!saved.items.some(item=>item.id===calcVialFormulaSelection))calcVialFormulaSelection=saved.items[0]?.id||'';
+  formula.innerHTML='<option value="">Cálculo atual (automático)</option>'+
+   saved.items.map(item=>'<option value="'+esc(item.id)+'"'+(item.id===calcVialFormulaSelection?' selected':'')+'>'+
+     esc(item.name||'Dosagem salva')+' · '+calcDisplay(item.dose)+' '+item.unit+'</option>').join('');
+  formula.value=calcVialFormulaSelection;
+ }
+ const tracked=$('#calc-vial-tracked-select');
+ if(tracked){
+  tracked.innerHTML='<option value="">Nenhum frasco físico vinculado</option>'+
    stored.items.map(item=>'<option value="'+esc(item.id)+'"'+(item.id===stored.active?' selected':'')+'>'+esc(item.name)+'</option>').join('');
+  tracked.value=stored.active||'';
  }
  const vial=stored.items.find(item=>item.id===stored.active);
- const enteredMass=Number($('#mass')?.value);
- const mass=vial?.mass||(Number.isFinite(enteredMass)?enteredMass:0);
- const volume=vial?.volume||Number($('#volume')?.value);
- const rawDose=Number($('#dose')?.value),unit=$('#doseUnit')?.value;
- const dose=unit==='mcg'?rawDose/1000:rawDose;
- const used=vial?vialMassUsed(vial,stored.links):0;
- const remaining=Math.max(0,mass-used);
- const percent=mass>0?Math.min(100,Math.max(0,remaining/mass*100)):0;
- const counts=mass>0&&volume>0&&dose>0&&Number.isFinite(dose)&&Number.isFinite(remaining)?
-  Math.max(0,Math.floor(remaining/dose)):null;
+ const fields=['mass','volume','dose'].map(id=>$('#'+id));
+ const valid=fields.every(field=>field&&field.value!==''&&!field.validity?.badInput&&Number.isFinite(Number(field.value))&&Number(field.value)>0);
+ const enteredMass=valid?Number($('#mass').value):0;
+ const doseRaw=valid?Number($('#dose').value):0;
+ const dose=$('#doseUnit')?.value==='mcg'?doseRaw/1000:doseRaw;
+ const mass=vial?.mass||enteredMass;
+ const applied=vial?vialMassUsed(vial,stored.links):0;
+ const remaining=Math.max(0,mass-applied);
+ const percent=valid&&mass>0?Math.max(0,Math.min(100,remaining/mass*100)):0;
+ const counts=valid&&dose>0&&mass>0?Math.max(0,Math.floor((remaining+1e-10)/dose)):null;
  const weeks=counts===null?null:counts/calcVialWeekly;
- const picture=vial?'<div class="calc-tracked-vial" style="--vial-fill:'+percent.toFixed(3)+'%" role="img" aria-label="'+
-  esc(calcDisplay(percent)+'% de conteúdo estimado restante no frasco')+'"><div class="calc-tracked-liquid"></div></div>':'';
- root.innerHTML='<div class="calc-vial-display">'+picture+'<div class="calc-vial-facts">'+
-  (vial?'<strong>'+esc(vial.name)+'</strong><span>Saldo estimado: '+calcDisplay(remaining)+' de '+calcDisplay(mass)+' mg</span>'+
-   '<span>Aplicações vinculadas: '+state.doses.filter(row=>stored.links[row.id]===vial.id).length+'</span>':
-   '<span>Informe o frasco e a dose para estimar o rendimento. Salve um frasco para acompanhar seu saldo.</span>')+
+ const subtitle=vial?'Acompanhamento do frasco físico: '+esc(vial.name):
+  calcVialFormulaSelection?'Estimativa da dosagem salva, usando os valores atuais da tela.':'Prévia do cálculo atual, sem frasco físico cadastrado.';
+ root.innerHTML='<div class="calc-vial-display"><div class="calc-vial-art" role="img" aria-label="Frasco com '+
+  esc(calcDisplay(percent))+'% de saldo estimado">'+calcVial('balance')+
+  '<strong class="calc-vial-percent">'+calcDisplay(percent)+'% restante</strong></div>'+
+  '<div class="calc-vial-facts"><span>'+subtitle+'</span>'+
+  (valid?'<span>Saldo estimado: '+calcDisplay(remaining)+' de '+calcDisplay(mass)+' mg</span>':
+   '<span>Preencha massa, volume e dose para estimar o rendimento.</span>')+
+  (vial?'<span>Aplicações vinculadas: '+state.doses.filter(item=>stored.links[item.id]===vial.id).length+'</span>':'')+
   (counts===null?'':'<strong>'+counts+' aplicação(ões) completas estimadas</strong><span>'+calcDisplay(weeks)+' semana(s) na frequência informada</span>')+
-  '</div></div>'+
-  '<p class="sub">Cálculo descritivo: não considera perdas, estabilidade após preparo nem substitui prescrição. O saldo é reduzido somente por aplicações vinculadas ao frasco neste dispositivo.</p>';
+  '</div></div><p class="sub">Estimativa matemática. O frasco ilustrado usa o mesmo desenho da calculadora; o saldo real só é descontado quando uma aplicação é vinculada a um frasco físico. Não considera perdas, estabilidade nem substitui prescrição.</p>';
+ const fill=root.querySelector('[data-calc-fill="balance"]');
+ if(fill){const height=39*percent/100;fill.setAttribute('y',85-height);fill.setAttribute('height',height);}
 }
 document.addEventListener('change',event=>{
  if(event.target.id==='calc-vial-weekly'){
@@ -519,6 +540,17 @@ document.addEventListener('change',event=>{
   updateCalcVial();
  }
  if(event.target.id==='calc-vial-select'){
+  const id=event.target.value||'';
+  try{
+   const saved=readCalcSaved(calcStorageKey());
+   const selected=saved.items.find(item=>item.id===id);
+   if(id&&!selected)throw Error('Dosagem salva indisponível.');
+   calcVialFormulaSelection=id;
+   if(selected)applyCalcSaved(selected);
+   updateCalcVial();
+  }catch(error){const node=$('#calc-vial-status');if(node)node.textContent=error.message;}
+ }
+ if(event.target.id==='calc-vial-tracked-select'){
   try{const stored=readCalcVials();stored.active=event.target.value||null;saveCalcVials(stored);updateCalcVial();}
   catch(error){const node=$('#calc-vial-status');if(node)node.textContent=error.message;}
  }
@@ -635,7 +667,8 @@ function restoreCalcSaved(){
  try{
   const saved=readCalcSaved(calcStorageKey());
   renderCalcSaved(saved);
-  const selected=saved.items.find(item=>item.id===saved.last);
+  const selected=saved.items[0]||null;
+  calcVialFormulaSelection=selected?.id||'';
   if(selected)applyCalcSaved(selected);
   updateCalcVial();
  }catch{$('#calc-saved-status').textContent='Não foi possível ler as dosagens neste navegador.';}
@@ -671,8 +704,10 @@ document.addEventListener('click',event=>{
  }else return;
  try{localStorage.setItem(key,JSON.stringify(saved));}
  catch{status.textContent='Não foi possível salvar a alteração. O armazenamento local está cheio ou indisponível.';return;}
+ if(action==='apply'||action==='save'){calcVialFormulaSelection=item.id;}
  if(action==='apply')applyCalcSaved(item);
  if(action==='save'){$('#calc-saved-name').value='';formDirty=false;}
+ updateCalcVial();
  renderCalcSaved(saved);
  status.textContent={save:'Dosagem salva neste dispositivo.',apply:'Dosagem aplicada.',rename:'Nome atualizado.',remove:'Dosagem excluída.'}[action];
  const focused=saved.items.some(value=>value.id===item.id)?
@@ -1065,7 +1100,12 @@ async function drawComparisonSource(source,signal,draw){
   if(objectURL)URL.revokeObjectURL(objectURL);
  }
 }
-function drawComparisonWeight(ctx,result,font,top){
+function comparisonExportPalette(theme){
+ return theme==='light'
+  ?{background:'#F4F5F6',text:'#142743',title:'#142743',accent:'#223F63',photo:'#E2E5EA',footer:'#EDF0F4',grid:'#A8B4CC',fade:'rgba(34,63,99,.25)',transparent:'rgba(34,63,99,0)',outline:'rgba(244,245,246,.95)',variation:'#142743'}
+  :{background:'#12100e',text:'#f8e8ca',title:'#dfbd78',accent:'#dfbd78',photo:'#27221d',footer:'#221c16',grid:'#524233',fade:'rgba(223,189,120,.35)',transparent:'rgba(223,189,120,0)',outline:'rgba(20,15,9,.80)',variation:'#ffe0a2'};
+}
+function drawComparisonWeight(ctx,result,font,top,palette){
  const {rows,reference,units}=result;
  if(rows.length<2)return;
  const {pts,ticks,y}=chartGeometry(rows,'value',reference);
@@ -1074,21 +1114,21 @@ function drawComparisonWeight(ctx,result,font,top){
  const display=value=>fmt(units==='lb'?value*2.2046226218:value);
  ctx.textAlign='right';
  for(const tick of ticks){
-  ctx.strokeStyle='#524233';
+  ctx.strokeStyle=palette.grid;
   ctx.lineWidth=1;
   ctx.beginPath();
   ctx.moveTo(px(38),py(tick.y));
   ctx.lineTo(px(585),py(tick.y));
   ctx.stroke();
-  ctx.fillStyle='#f8e8ca';
+  ctx.fillStyle=palette.text;
   ctx.fillText(display(tick.value)+' '+units,px(34),py(tick.y)+11,px(34)-14);
  }
  const fade=ctx.createLinearGradient(0,py(25),0,py(180));
- fade.addColorStop(0,'rgba(223,189,120,.35)');
- fade.addColorStop(1,'rgba(223,189,120,0)');
+ fade.addColorStop(0,palette.fade);
+ fade.addColorStop(1,palette.transparent);
  ctx.beginPath();
  pts.forEach((point,index)=>index?ctx.lineTo(px(point.x),py(point.y)):ctx.moveTo(px(point.x),py(point.y)));
- ctx.strokeStyle='#dfbd78';
+ ctx.strokeStyle=palette.accent;
  ctx.lineWidth=4;
  ctx.lineJoin='round';
  ctx.stroke();
@@ -1106,14 +1146,14 @@ function drawComparisonWeight(ctx,result,font,top){
   ctx.stroke();
   ctx.restore();
  }
- ctx.fillStyle='#dfbd78';
+ ctx.fillStyle=palette.accent;
  for(const point of pts){
   ctx.beginPath();
   ctx.arc(px(point.x),py(point.y),5,0,Math.PI*2);
   ctx.fill();
  }
  ctx.textAlign='center';
- ctx.fillStyle='#f8e8ca';
+ ctx.fillStyle=palette.text;
  ctx.textAlign='left';
  ctx.fillText(date(rows[0].date),px(38),1894);
  ctx.textAlign='right';
@@ -1202,22 +1242,24 @@ async function showComparisonExport(trigger){
   canvas.height=canvas.width*16/9;
   const ctx=canvas.getContext('2d');
   if(!ctx)throw Error('Canvas indisponível.');
+  const palette=comparisonExportPalette(document.documentElement.dataset.theme);
   ctx.scale(canvas.width/1080,canvas.width/1080);
-  ctx.fillStyle='#12100e';
+  ctx.fillStyle=palette.background;
   ctx.fillRect(0,0,1080,1920);
   ctx.textAlign='center';
-  ctx.fillStyle='#dfbd78';
+  ctx.fillStyle=palette.accent;
   ctx.font=`700 59px ${font}`;
+  ctx.fillStyle=palette.title;
   ctx.fillText('Minha Evolução',540,76);
   const photoTop=202,maxPhotoHeight=1310,heights=[];
   for(const [side,photo] of photos.entries()){
    const x=side*540,center=x+270;
-   ctx.fillStyle='#27221d';
+   ctx.fillStyle=palette.photo;
    ctx.fillRect(x,photoTop,540,maxPhotoHeight);
-   ctx.fillStyle='#dfbd78';
+   ctx.fillStyle=palette.accent;
    ctx.font=`700 38px ${font}`;
    ctx.fillText(side?'DEPOIS':'ANTES',center,145);
-   ctx.fillStyle='#f8e8ca';
+   ctx.fillStyle=palette.text;
    ctx.font=`400 30px ${font}`;
    ctx.fillText(photo?date(photo.date):'Exemplo',center,185);
    const source=photo?await Cloud.photoBlob(photo):`assets/photo-example-${side+1}.png`;
@@ -1231,7 +1273,7 @@ async function showComparisonExport(trigger){
   const overlap=Math.min(...heights);
   const markSize=Math.min(174,overlap*.37);
   const markTop=photoBottom-markSize/2;
-  ctx.fillStyle='#221c16';
+  ctx.fillStyle=palette.footer;
   ctx.fillRect(0,photoBottom,1080,1920-photoBottom);
   ctx.textAlign='center';
   ctx.font=`700 ${markSize*1.15}px ${font}`;
@@ -1244,7 +1286,7 @@ async function showComparisonExport(trigger){
   ctx.globalAlpha=.30;
   await drawComparisonSource('assets/icon-512.png',controller.signal,image=>drawComparisonImage(ctx,image,markLeft,markTop,markSize,markSize));
   if(!current())return;
-  ctx.fillStyle='#dfbd78';
+  ctx.fillStyle=palette.accent;
   ctx.fillText('NeoPep',markLeft+markSize+markGap+nameWidth/2,photoBottom+nameOffset,690);
   ctx.globalAlpha=1;
   ctx.textBaseline='alphabetic';
@@ -1255,14 +1297,14 @@ async function showComparisonExport(trigger){
    ctx.font=`800 ${fontSize}px ${font}`;
    ctx.lineJoin='round';
    ctx.lineWidth=fontSize/13;
-   ctx.strokeStyle='rgba(20,15,9,.80)';
-   ctx.fillStyle='#ffe0a2';
+   ctx.strokeStyle=palette.outline;
+   ctx.fillStyle=palette.variation;
    ctx.strokeText(variation.display,540,baseline,960);
    ctx.fillText(variation.display,540,baseline,960);
    ctx.restore();
   }
   // Paint the data over the translucent mark to keep the plot readable.
-  drawComparisonWeight(ctx,variation,font,photoBottom);
+  drawComparisonWeight(ctx,variation,font,photoBottom,palette);
   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.93));
   if(!current())return;
   if(!blob)throw Error('Composição indisponível.');

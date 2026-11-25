@@ -62,7 +62,9 @@
       "release/preparacao-paridade-producao-20261122": true,
       "release/ciclo-aprovado-20261125": false,
       "homologacao/ciclo-completo-2026-11-24": false,
-      "fix/pacote-final-20261125": false
+      "fix/pacote-final-20261125": false,
+      "preparacao/auditoria-final-teste-20261125": false,
+      "preparacao/auditoria-final-producao-20261125": false
     }
   }
 }
