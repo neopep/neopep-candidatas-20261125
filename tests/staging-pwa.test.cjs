@@ -21,7 +21,7 @@ test('staging installs at the root and keeps the former launch and worker routes
   fs.writeFileSync(path.join(work, 'fetch.cjs'), 'global.fetch = async () => ({ ok: true });');
   execFileSync(process.execPath, ['--require', './fetch.cjs', 'scripts/build-staging.cjs'], {
     cwd: work, env: {
-      ...process.env, VERCEL: '1', VERCEL_GIT_COMMIT_REF: 'staging/permanente',
+      ...process.env, VERCEL: '1', VERCEL_GIT_COMMIT_REF: 'staging/permanente', VERCEL_PROJECT_ID: 'prj_ksWxwsJyKhdR2nW2OiZkwx8hlkdq',
       NEO_STAGING_SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_fixture'
     }
   });
@@ -60,8 +60,8 @@ test('staging installs at the root and keeps the former launch and worker routes
     URL, self: { registration: { scope }, addEventListener() {} }
   });
   assert.notEqual(cache('https://test.example/'), cache('https://test.example/neo/'));
-  assert.match(cache('https://test.example/'),/pwa-v45-pacote-final$/);
-  assert.match(cache('https://test.example/neo/'),/pwa-v45-pacote-final$/);
+  assert.match(cache('https://test.example/'),/pwa-v47-auditoria-final$/);
+  assert.match(cache('https://test.example/neo/'),/pwa-v47-auditoria-final$/);
   assert.match(read('sw.js'),/'appearance\.js'/);
   assert.match(read('sw.js'),/'library-video\.js','library-files\.js'/);
   for(const file of ['index.html','neo/index.html']){

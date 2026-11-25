@@ -33,6 +33,7 @@ test('vitrine mostra texto aprovado e um único atalho ao atendimento interno, c
  await s.ui.loadHome(ctx);
  const title=root.querySelector('.shop-home h2');
  const shortcuts=root.querySelectorAll('[data-shop-home-support]');
+ const supportMarkup=shortcuts[0]?.outerHTML;
  assert.equal(title.textContent,'Encontre o que você procura.');
  assert.equal(shortcuts.length,1);
  assert.equal(shortcuts[0].textContent,'Não encontrou o que procura? Fale com nosso atendimento para consultar a disponibilidade.');
@@ -40,6 +41,11 @@ test('vitrine mostra texto aprovado e um único atalho ao atendimento interno, c
  assert.equal(shortcuts[0].dataset.supportShortcut,'true');
  assert.equal(shortcuts[0].querySelector('svg').getAttribute('aria-hidden'),'true');
  assert.ok(root.querySelector('[data-go=loja]'));
+ root.innerHTML=s.ui.view(s.context);
+ await s.ui.load();
+ assert.equal(root.querySelector('.shop-hero h2').textContent,'Encontre o que você procura.');
+ assert.equal(root.querySelectorAll('.shop-hero [data-shop-home-support]').length,1);
+ assert.equal(root.querySelector('.shop-hero [data-shop-home-support]').outerHTML,supportMarkup);
  delete s.window.NeoCloud.support;
  root.innerHTML=s.ui.home(ctx);
  assert.equal(root.querySelector('[data-shop-home-support]'),null);

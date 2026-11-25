@@ -30,11 +30,16 @@
    const start=Date.parse(rule.start+'T00:00:00Z'),horizon=Date.parse(today+'T00:00:00Z')+89*86400000;
    const end=rule.end?Date.parse(rule.end+'T00:00:00Z'):horizon;
    if(!Number.isFinite(start)||!Number.isFinite(end)||end>horizon||start>end||rule.start<today||rule.count<1||rule.count>24)return [];
+   const times=[...new Set(rule.times)].sort();
+   if(times.length!==rule.times.length||!times.length||times.length>8||times.some(time=>!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)))return [];
    const dates=[];
    for(let at=start;at<=end&&dates.length<rule.count;at+=86400000){
     const day=new Date(at);
-    const occurrence=day.toISOString().slice(0,10)+'T'+rule.time;
-    if(rule.days.includes(day.getUTCDay())&&occurrence>now)dates.push(occurrence);
+    if(rule.frequency!=='daily'&&!rule.days.includes(day.getUTCDay()))continue;
+    for(const time of times){
+     const occurrence=day.toISOString().slice(0,10)+'T'+time;
+     if(occurrence>now&&dates.length<rule.count)dates.push(occurrence);
+    }
    }
    return dates;
   }
@@ -95,18 +100,19 @@
   function details(){
    screen='detail';
    const editable=!detail.archived_at;
-   const items=detail.publications;
+   const items=view==='history'?detail.publications:detail.publications.filter(pub=>!pub.deleted_at);
    const ordered=[...items].sort((a,b)=>(a.batches[0]?.due_at||a.planned_local||'').localeCompare(b.batches[0]?.due_at||b.planned_local||''));
    const undated=ordered.filter(pub=>!pub.planned_local&&!pub.batches.length);
    const dated=ordered.filter(pub=>!undated.includes(pub));
    const cards=entries=>entries.map(pub=>{
-    const batch=pub.batches[0],locked=pub.legacy_dispatch||Boolean(batch&&(batch.cancelled_at==null||batch.states?.some(value=>value!=='cancelled')));
-    return `<article class="monitor-block"><div class="between"><strong>${escape(pub.title)}</strong><span class="campaign-state">${status(pub)}</span></div>
+    const batch=pub.batches[0],locked=Boolean(pub.deleted_at)||pub.legacy_dispatch||Boolean(batch&&(batch.cancelled_at==null||batch.states?.some(value=>value!=='cancelled')));
+    return `<article class="monitor-block"><div class="between"><strong>${escape(pub.title)}</strong><span class="campaign-state">${pub.deleted_at?'Excluída':status(pub)}</span></div>
      <p class="sub">${batch?date(batch.due_at):local(pub.planned_local)||'Sem data'} · São Paulo · ${pub.kinds?.length||0} mensagem(ns)${pub.kinds?.length?' · '+escape(pub.kinds.join(', ')):''}</p>
      ${view==='agenda'&&editable&&pub.planned_local&&!locked?`<label class="check"><input type="checkbox" name="selected-publication" value="${escape(pub.id)}"> Selecionar para agendar</label>`:''}
      <div class="inline-actions">${button('edit',locked||!editable?'Ver publicação':'Editar publicação',pub.id)}
-     ${editable?button('duplicate_form','Duplicar / distribuir',pub.id)+(typeof cloud.campaignWeekly==='function'?button('weekly_form','Repetir semanalmente',pub.id):''):''}
-     ${batch?.states?.includes('waiting')&&editable?button('cancel','Cancelar pendências',pub.id):''}</div>
+     ${editable&&!pub.deleted_at?button('duplicate_form','Duplicar / distribuir',pub.id)+(typeof cloud.campaignWeekly==='function'?button('weekly_form','Programar repetição',pub.id):''):''}
+     ${batch?.states?.includes('waiting')&&editable&&!pub.deleted_at?button('cancel','Cancelar pendências',pub.id):''}
+     ${editable&&!pub.deleted_at?button('delete_publication','Excluir publicação',pub.id):''}</div>
      ${view==='history'?`<div data-central-history="${escape(pub.id)}">${button('attempts','Ver tentativas e recibos',pub.id)}</div>`:''}</article>`;
    }).join('');
    redraw(`${button('back','‹ Campanhas')}<div class="between"><h2>${escape(detail.title)}</h2>${editable?button('rename','Renomear')+button('archive','Arquivar'):''}${button('delete','Excluir campanha')}</div>
@@ -114,7 +120,7 @@
     <div class="inline-actions">${button('agenda','Agenda','',view==='agenda'?'primary':'secondary')}${button('history','Histórico','',view==='history'?'primary':'secondary')}</div>
     ${view==='agenda'? `<label>Filtrar a partir de<input type="date" data-central-date></label><div data-central-date-list>${cards(dated)||'<p>Sem publicações com data.</p>'}</div>
      <h3>Rascunhos sem data</h3>${cards(undated)||'<p>Sem rascunhos sem data.</p>'}
-     ${weekly.length?`<h3>Repetições semanais</h3>${weekly.map(item=>`<article class="monitor-block">
+     ${weekly.length?`<h3>Repetições programadas</h3>${weekly.map(item=>`<article class="monitor-block">
       <strong>${escape(items.find(pub=>pub.id===item.publication_id)?.title||'Publicação')}</strong>
       <p class="sub">${({scheduled:'Agendada',paused:'Pausada',cancelled:'Cancelada'})[item.state]} · ${escape(item.dates.map(local).join(' · '))}</p>
       <div class="inline-actions">${editable&&item.state!=='cancelled'?button('weekly_edit','Editar datas',item.id)+
@@ -144,10 +150,11 @@
   }
   function weeklyForm(pub,existing){
    const rule=existing?.rule||{};
-   redraw(`${button('open','‹ Agenda',current)}<h2>Repetir semanalmente</h2><p>${escape(pub.title)}</p>
+   redraw(`${button('open','‹ Agenda',current)}<h2>Programar repetição</h2><p>${escape(pub.title)}</p>
     <form data-central-form="weekly" data-id="${escape(pub.id)}" data-request="${crypto.randomUUID()}" data-replace="${escape(existing?.id)}" class="campaign-central-form">
-    <fieldset><legend>Dias da semana</legend><div class="inline-actions">${weekdays.map((day,i)=>`<label class="check"><input type="checkbox" name="days" value="${i}" ${rule.days?.includes(i)?'checked':''}> ${day}</label>`).join('')}</div></fieldset>
-    <label>Horário em São Paulo<input type="time" name="time" value="${escape(rule.time)}" required></label>
+    <label>Frequência<select name="frequency"><option value="weekly">Semanal</option><option value="daily" ${rule.frequency==='daily'?'selected':''}>Diária</option></select></label>
+    <fieldset><legend>Dias da semana (repetição semanal)</legend><div class="inline-actions">${weekdays.map((day,i)=>`<label class="check"><input type="checkbox" name="days" value="${i}" ${rule.days?.includes(i)?'checked':''}> ${day}</label>`).join('')}</div></fieldset>
+    <label>Horários em São Paulo<input name="times" value="${escape(rule.times?.join(', ')||rule.time)}" placeholder="09:00, 18:30" required></label>
     <label>Início<input type="date" name="start" value="${escape(rule.start)}" required></label>
     <label>Término (opcional)<input type="date" name="end" value="${escape(rule.end)}"></label>
     <label>Número máximo de ocorrências<input type="number" name="count" min="1" max="24" value="${rule.count||4}" required></label>
@@ -200,7 +207,7 @@
      if(active()){view='agenda';await load(result.campaign_id);}
     }else if(form.dataset.centralForm==='weekly'){
      const fields=new FormData(form),source=await rpc('load',{publication_id:form.dataset.id});
-     const rule={start:fields.get('start'),end:fields.get('end'),time:fields.get('time'),count:Number(fields.get('count')),
+     const rule={start:fields.get('start'),end:fields.get('end'),frequency:fields.get('frequency'),times:String(fields.get('times')).split(',').map(time=>time.trim()),count:Number(fields.get('count')),
       days:fields.getAll('days').map(Number)};
      const dates=weeklyDates(rule),groups=source?.draft?.groups||[];
      if(!dates.length||!groups.length){show('Confira datas e horários e selecione destinos na publicação.');return;}
@@ -248,7 +255,11 @@
      const id=getLocal(pointer());
      removeLocal('neo-campaign-editor:'+account+':whatsapp:'+current+':'+id);removeLocal(pointer());details();
     }
-    if(action==='edit'&&pub)await editor(id,control,{readOnly:Boolean(detail.archived_at||pub.legacy_dispatch||pub.batches[0]&&
+    if(action==='delete_publication'&&pub&&!pub.deleted_at&&confirm('Excluir esta publicação e cancelar as pendências que ainda não começaram? O histórico será preservado.')){
+     await rpc('delete_publication',{publication_id:pub.id,confirmed:true});
+     await load(current);
+    }
+    if(action==='edit'&&pub)await editor(id,control,{readOnly:Boolean(detail.archived_at||pub.deleted_at||pub.legacy_dispatch||pub.batches[0]&&
      (pub.batches[0].cancelled_at==null||pub.batches[0].states?.some(value=>value!=='cancelled')))});
     if(action==='duplicate_form'&&pub)duplicateForm(pub);
     if(action==='weekly_form'&&pub)weeklyForm(pub);
@@ -280,7 +291,7 @@
      const holder=control.parentElement;
      if(active()&&holder.isConnected)holder.innerHTML=history.map(row=>`<p class="sub">Mensagem ${escape(row.sequence)} · ${labels[row.dispatch_state]||escape(row.dispatch_state)} · ${escape(row.dispatch_attempts)} tentativa(s) · ${row.has_receipt?'Recibo registrado':'Sem recibo'} · ${date(row.scheduled_at)}</p>`).join('')||'<p>Sem tentativas de despacho.</p>';
     }
-   }catch{show('Não foi possível concluir. Confira a autorização, o estado da publicação e o Connect de Teste.');}
+   }catch{show('Não foi possível concluir. Confira a autorização, o estado da publicação e a conexão do NeoPep Connect.');}
    finally{busy=false;}
   });
   root.addEventListener('change',event=>{

@@ -70,7 +70,9 @@
       "desenvolvimento/ajuste-010-06-conciliacao": false,
       "desenvolvimento/ajuste-011-gerenciamento-massa": false,
       "homologacao/ciclo-completo-2026-11-24": false,
-      "fix/pacote-final-teste-20261125": false
+      "fix/pacote-final-teste-20261125": false,
+      "preparacao/auditoria-final-teste-20261125": false,
+      "preparacao/auditoria-final-producao-20261125": false
     }
   }
 }

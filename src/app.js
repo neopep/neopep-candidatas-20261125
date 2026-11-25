@@ -1100,7 +1100,12 @@ async function drawComparisonSource(source,signal,draw){
   if(objectURL)URL.revokeObjectURL(objectURL);
  }
 }
-function drawComparisonWeight(ctx,result,font,top){
+function comparisonExportPalette(theme){
+ return theme==='light'
+  ?{background:'#F4F5F6',text:'#142743',title:'#142743',accent:'#223F63',photo:'#E2E5EA',footer:'#EDF0F4',grid:'#A8B4CC',fade:'rgba(34,63,99,.25)',transparent:'rgba(34,63,99,0)',outline:'rgba(244,245,246,.95)',variation:'#142743'}
+  :{background:'#12100e',text:'#f8e8ca',title:'#dfbd78',accent:'#dfbd78',photo:'#27221d',footer:'#221c16',grid:'#524233',fade:'rgba(223,189,120,.35)',transparent:'rgba(223,189,120,0)',outline:'rgba(20,15,9,.80)',variation:'#ffe0a2'};
+}
+function drawComparisonWeight(ctx,result,font,top,palette){
  const {rows,reference,units}=result;
  if(rows.length<2)return;
  const {pts,ticks,y}=chartGeometry(rows,'value',reference);
@@ -1109,21 +1114,21 @@ function drawComparisonWeight(ctx,result,font,top){
  const display=value=>fmt(units==='lb'?value*2.2046226218:value);
  ctx.textAlign='right';
  for(const tick of ticks){
-  ctx.strokeStyle='#524233';
+  ctx.strokeStyle=palette.grid;
   ctx.lineWidth=1;
   ctx.beginPath();
   ctx.moveTo(px(38),py(tick.y));
   ctx.lineTo(px(585),py(tick.y));
   ctx.stroke();
-  ctx.fillStyle='#f8e8ca';
+  ctx.fillStyle=palette.text;
   ctx.fillText(display(tick.value)+' '+units,px(34),py(tick.y)+11,px(34)-14);
  }
  const fade=ctx.createLinearGradient(0,py(25),0,py(180));
- fade.addColorStop(0,'rgba(223,189,120,.35)');
- fade.addColorStop(1,'rgba(223,189,120,0)');
+ fade.addColorStop(0,palette.fade);
+ fade.addColorStop(1,palette.transparent);
  ctx.beginPath();
  pts.forEach((point,index)=>index?ctx.lineTo(px(point.x),py(point.y)):ctx.moveTo(px(point.x),py(point.y)));
- ctx.strokeStyle='#dfbd78';
+ ctx.strokeStyle=palette.accent;
  ctx.lineWidth=4;
  ctx.lineJoin='round';
  ctx.stroke();
@@ -1141,14 +1146,14 @@ function drawComparisonWeight(ctx,result,font,top){
   ctx.stroke();
   ctx.restore();
  }
- ctx.fillStyle='#dfbd78';
+ ctx.fillStyle=palette.accent;
  for(const point of pts){
   ctx.beginPath();
   ctx.arc(px(point.x),py(point.y),5,0,Math.PI*2);
   ctx.fill();
  }
  ctx.textAlign='center';
- ctx.fillStyle='#f8e8ca';
+ ctx.fillStyle=palette.text;
  ctx.textAlign='left';
  ctx.fillText(date(rows[0].date),px(38),1894);
  ctx.textAlign='right';
@@ -1237,22 +1242,24 @@ async function showComparisonExport(trigger){
   canvas.height=canvas.width*16/9;
   const ctx=canvas.getContext('2d');
   if(!ctx)throw Error('Canvas indisponível.');
+  const palette=comparisonExportPalette(document.documentElement.dataset.theme);
   ctx.scale(canvas.width/1080,canvas.width/1080);
-  ctx.fillStyle='#12100e';
+  ctx.fillStyle=palette.background;
   ctx.fillRect(0,0,1080,1920);
   ctx.textAlign='center';
-  ctx.fillStyle='#dfbd78';
+  ctx.fillStyle=palette.accent;
   ctx.font=`700 59px ${font}`;
+  ctx.fillStyle=palette.title;
   ctx.fillText('Minha Evolução',540,76);
   const photoTop=202,maxPhotoHeight=1310,heights=[];
   for(const [side,photo] of photos.entries()){
    const x=side*540,center=x+270;
-   ctx.fillStyle='#27221d';
+   ctx.fillStyle=palette.photo;
    ctx.fillRect(x,photoTop,540,maxPhotoHeight);
-   ctx.fillStyle='#dfbd78';
+   ctx.fillStyle=palette.accent;
    ctx.font=`700 38px ${font}`;
    ctx.fillText(side?'DEPOIS':'ANTES',center,145);
-   ctx.fillStyle='#f8e8ca';
+   ctx.fillStyle=palette.text;
    ctx.font=`400 30px ${font}`;
    ctx.fillText(photo?date(photo.date):'Exemplo',center,185);
    const source=photo?await Cloud.photoBlob(photo):`assets/photo-example-${side+1}.png`;
@@ -1266,7 +1273,7 @@ async function showComparisonExport(trigger){
   const overlap=Math.min(...heights);
   const markSize=Math.min(174,overlap*.37);
   const markTop=photoBottom-markSize/2;
-  ctx.fillStyle='#221c16';
+  ctx.fillStyle=palette.footer;
   ctx.fillRect(0,photoBottom,1080,1920-photoBottom);
   ctx.textAlign='center';
   ctx.font=`700 ${markSize*1.15}px ${font}`;
@@ -1279,7 +1286,7 @@ async function showComparisonExport(trigger){
   ctx.globalAlpha=.30;
   await drawComparisonSource('assets/icon-512.png',controller.signal,image=>drawComparisonImage(ctx,image,markLeft,markTop,markSize,markSize));
   if(!current())return;
-  ctx.fillStyle='#dfbd78';
+  ctx.fillStyle=palette.accent;
   ctx.fillText('NeoPep',markLeft+markSize+markGap+nameWidth/2,photoBottom+nameOffset,690);
   ctx.globalAlpha=1;
   ctx.textBaseline='alphabetic';
@@ -1290,14 +1297,14 @@ async function showComparisonExport(trigger){
    ctx.font=`800 ${fontSize}px ${font}`;
    ctx.lineJoin='round';
    ctx.lineWidth=fontSize/13;
-   ctx.strokeStyle='rgba(20,15,9,.80)';
-   ctx.fillStyle='#ffe0a2';
+   ctx.strokeStyle=palette.outline;
+   ctx.fillStyle=palette.variation;
    ctx.strokeText(variation.display,540,baseline,960);
    ctx.fillText(variation.display,540,baseline,960);
    ctx.restore();
   }
   // Paint the data over the translucent mark to keep the plot readable.
-  drawComparisonWeight(ctx,variation,font,photoBottom);
+  drawComparisonWeight(ctx,variation,font,photoBottom,palette);
   const blob=await new Promise(resolve=>canvas.toBlob(resolve,'image/jpeg',.93));
   if(!current())return;
   if(!blob)throw Error('Composição indisponível.');
